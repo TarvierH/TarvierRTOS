@@ -1,5 +1,14 @@
 #include "list.h"
 
+/**
+ * @brief 初始化一个链表。
+ *
+ * 将链表置为空：哨兵节点（xListEnd）的前后指针指向自身，
+ * 游标（pxIndex）指向哨兵，哨兵值设为 UINT32_MAX 作为查找终止值，
+ * 并将链表项计数清零。
+ *
+ * @param pxList 待初始化的链表，不能为 NULL。
+ */
 void vListInitialise(List_t *pxList)
 {
     /* 初始时链表为空：哨兵自己指向自己，游标也指向哨兵 */
@@ -17,6 +26,16 @@ void vListInitialiseItem(ListItem_t *pxItem)
     pxItem->pvContainer = NULL; /* 关键：标记“不在任何链表中” */
 }
 
+/**
+ * @brief 在链表游标（pxIndex）之前插入列表项。
+ *
+ * 与 vListInsert 不同，本函数不按 xItemValue 排序，而是直接将 pxItem
+ * 插入到 pxList->pxIndex 所指向节点之前；当游标指向哨兵节点时，
+ * 等价于追加到链表尾部。
+ *
+ * @param pxList 目标链表，不能为 NULL。
+ * @param pxItem 待插入的列表项，不能为 NULL。
+ */
 void vListInsertEnd(List_t *pxList, ListItem_t *pxItem)
 {
     ListItem_t *pxIndex = pxList->pxIndex;
@@ -31,6 +50,17 @@ void vListInsertEnd(List_t *pxList, ListItem_t *pxItem)
     pxList->uxNumberOfItems++;
 }
 
+/**
+ * @brief 按 xItemValue 升序将列表项插入链表。
+ *
+ * 从哨兵节点出发向后遍历，找到第一个值大于 xItemValue 的节点，
+ * 将 pxItem 插入其之前（即插入位置之后为严格大于 xItemValue 的节点，
+ * 相同值的项排在已有项之后）。由于哨兵值为 UINT32_MAX，遍历必然终止。
+ * 若 xItemValue 等于哨兵值 UINT32_MAX，则直接插入到尾部（哨兵之前）。
+ *
+ * @param pxList 目标链表，不能为 NULL。
+ * @param pxItem 待插入的列表项，不能为 NULL。
+ */
 void vListInsert(List_t *pxList, ListItem_t *pxItem)
 {
     ListItem_t *pxIterator;
