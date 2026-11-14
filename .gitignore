@@ -4,5 +4,5 @@ build/
 *.bin
 *.hex
 *.map
-.vscode/
+.vscode/tasks.json
 tests/*.exe

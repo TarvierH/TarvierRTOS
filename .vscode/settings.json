@@ -1,0 +1,20 @@
+{
+    "C_Cpp.default.compilerPath": "C:/Code/tools/arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi/bin/arm-none-eabi-gcc.exe",
+    "C_Cpp.default.intelliSenseMode": "gcc-arm",
+    "C_Cpp.default.cStandard": "c11",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/app",
+        "${workspaceFolder}/bsp",
+        "${workspaceFolder}/rtos",
+        "${workspaceFolder}/rtos/core",
+        "${workspaceFolder}/rtos/port",
+        "${workspaceFolder}/rtos/ipc",
+        "${workspaceFolder}/rtos/timer",
+        "${workspaceFolder}/tests"
+    ],
+    "C_Cpp.default.systemIncludePath": [
+        "C:/Code/tools/arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi/arm-none-eabi/include",
+        "C:/Code/tools/arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi/lib/gcc/arm-none-eabi/13.3.1/include",
+        "C:/Code/tools/arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi/lib/gcc/arm-none-eabi/13.3.1/include-fixed"
+    ]
+}

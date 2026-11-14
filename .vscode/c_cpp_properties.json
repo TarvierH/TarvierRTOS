@@ -1,0 +1,47 @@
+{
+    "configurations": [
+        {
+            "name": "STM32 (arm-none-eabi)",
+            "compilerPath": "C:/Code/tools/arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi/bin/arm-none-eabi-gcc.exe",
+            "intelliSenseMode": "gcc-arm",
+            "cStandard": "c11",
+            "defines": [
+                "__ARM_ARCH_7M__",
+                "__thumb__"
+            ],
+            "includePath": [
+                "${workspaceFolder}/app",
+                "${workspaceFolder}/bsp",
+                "${workspaceFolder}/rtos",
+                "${workspaceFolder}/rtos/core",
+                "${workspaceFolder}/rtos/port",
+                "${workspaceFolder}/rtos/ipc",
+                "${workspaceFolder}/rtos/timer",
+                "${workspaceFolder}/tests",
+                "C:/Code/tools/arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi/arm-none-eabi/include",
+                "C:/Code/tools/arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi/lib/gcc/arm-none-eabi/13.3.1/include",
+                "C:/Code/tools/arm-gnu-toolchain-13.3.rel1-mingw-w64-i686-arm-none-eabi/lib/gcc/arm-none-eabi/13.3.1/include-fixed"
+            ]
+        },
+        {
+            "name": "Host tests (MinGW)",
+            "compilerPath": "C:/Code/mingw64/bin/gcc.exe",
+            "intelliSenseMode": "gcc-x64",
+            "cStandard": "c11",
+            "includePath": [
+                "${workspaceFolder}/app",
+                "${workspaceFolder}/bsp",
+                "${workspaceFolder}/rtos",
+                "${workspaceFolder}/rtos/core",
+                "${workspaceFolder}/rtos/port",
+                "${workspaceFolder}/rtos/ipc",
+                "${workspaceFolder}/rtos/timer",
+                "${workspaceFolder}/tests",
+                "C:/Code/mingw64/x86_64-w64-mingw32/include",
+                "C:/Code/mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/include",
+                "C:/Code/mingw64/lib/gcc/x86_64-w64-mingw32/16.1.0/include-fixed"
+            ]
+        }
+    ],
+    "version": 4
+}
