@@ -6,6 +6,10 @@
 #include <string.h>
 #include <stdint.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "task.h"
 #include "list.h"
 #include "port.h"
@@ -218,6 +222,13 @@ static void test_lowest_priority(void)
 
 int main(void)
 {
+#ifdef _WIN32
+    /* Windows 控制台默认使用 GBK(936) 代码页，而本程序输出 UTF-8，
+     * 不设置的话中文会显示为乱码。改为 UTF-8 后正常显示。 */
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
+
     test_list_sorted_insert();
     test_list_insert_end_and_remove();
     test_task_create_and_ready_list();
