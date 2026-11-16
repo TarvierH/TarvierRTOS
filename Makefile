@@ -15,7 +15,10 @@ BUILD  := build
 # Source files (add RTOS sources here as they are written)
 SRCS := app/main.c \
         bsp/bsp.c \
-        bsp/syscalls.c
+        bsp/syscalls.c \
+        rtos/core/task.c \
+        rtos/core/list.c \
+        rtos/port/port.c
 ASMS := startup_stm32f103.s
 
 OBJS := $(addprefix $(BUILD)/, $(SRCS:.c=.o)) \
@@ -23,7 +26,7 @@ OBJS := $(addprefix $(BUILD)/, $(SRCS:.c=.o)) \
 
 CFLAGS  := -mcpu=cortex-m3 -mthumb -O2 -g3 -std=c11 \
            -Wall -Wextra -ffunction-sections -fdata-sections \
-           -Ibsp -Iapp
+           -Ibsp -Iapp -Irtos -Irtos/core -Irtos/port
 LDFLAGS := -mcpu=cortex-m3 -mthumb -nostartfiles -T linker.ld \
            -Wl,--gc-sections -Wl,-Map=$(BUILD)/$(TARGET).map \
            --specs=nano.specs

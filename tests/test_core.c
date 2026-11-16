@@ -25,7 +25,7 @@ static int s_checks = 0;
     }                                                                     \
 } while (0)
 
-/* ---- 宿主平台的栈初始化占位实现（Cortex-M 版在下一步实现） ---- */
+/* ---- 宿主平台的栈初始化占位实现（真机版在 port.c） ---- */
 uint32_t *pxPortInitialiseStack(uint32_t *pxTopOfStack,
                                 TaskFunction_t pxCode,
                                 void *pvParameters)
@@ -34,6 +34,12 @@ uint32_t *pxPortInitialiseStack(uint32_t *pxTopOfStack,
     *(--pxTopOfStack) = (uint32_t)(uintptr_t)pvParameters;
     *(--pxTopOfStack) = (uint32_t)(uintptr_t)pxCode;
     return pxTopOfStack;
+}
+
+/* ---- 宿主平台：调度器启动占位（真机版在 port.c，用 SVC 启动首个任务） ---- */
+void xPortStartScheduler(void)
+{
+    /* 宿主测试不会真正启动调度器 */
 }
 
 /* ---- 测试任务函数（不会被真正调度，仅用作创建参数） ---- */

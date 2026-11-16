@@ -128,9 +128,15 @@ void bsp_tick_isr(void)
     s_tick_ms++;
 }
 
+/* 弱符号：RTOS 移植层（port.c）用强符号覆盖，执行调度节拍 */
+__attribute__((weak)) void rtos_systick_hook(void)
+{
+}
+
 /* SysTick_Handler is declared weak in the startup file; this strong
  * definition overrides it. */
 void SysTick_Handler(void)
 {
     bsp_tick_isr();
+    rtos_systick_hook();
 }

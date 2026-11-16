@@ -13,6 +13,15 @@
 #include "list.h"
 #include "rtos_config.h"
 
+/* ---- 基础类型（精简版 FreeRTOS 命名） ---- */
+typedef long BaseType_t;          /* 返回状态：pdTRUE / pdFALSE */
+typedef unsigned long UBaseType_t;
+typedef uint32_t TickType_t;      /* 节拍计数 */
+typedef uint32_t StackType_t;     /* 栈元素类型 */
+
+#define pdTRUE   ((BaseType_t)1)
+#define pdFALSE  ((BaseType_t)0)
+
 typedef void (*TaskFunction_t)(void *);
 
 typedef enum {
@@ -41,6 +50,24 @@ extern List_t pxReadyTasksLists[configMAX_PRIORITIES];
 
 /* 就绪位图：bit i 置位表示优先级 i 有就绪任务 */
 extern uint32_t uxReadyPriorityBitmap;
+
+/* 当前正在运行的任务（上下文切换围绕它进行） */
+extern TCB_t *pxCurrentTCB;
+
+/* 调度器是否已启动（SysTick 钩子据此判断是否执行调度） */
+extern volatile uint32_t xSchedulerRunning;
+
+/* 系统节拍处理：返回 pdTRUE 表示需要切换任务 */
+BaseType_t xTaskIncrementTick(void);
+
+/* 选出下一个要运行的任务（在 PendSV 里调用） */
+void vTaskSwitchContext(void);
+
+/* 启动调度器：创建空闲任务并启动首个任务（不会返回） */
+void vTaskStartScheduler(void);
+
+/* 任务函数正常返回后停在这里（port.c 用作任务栈帧的初始 LR） */
+void prvTaskExitError(void);
 
 /* 初始化内核核心数据结构（就绪列表、位图），须在创建任务前调用一次 */
 void vTaskInitialiseCore(void);

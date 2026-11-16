@@ -87,3 +87,42 @@ for (pxIterator = &pxList->xListEnd;
 - `xItemValue`：类型是 `TickType_t`（时间/排序值），用 `x` 前缀。
 - `uxNumberOfItems`：类型是 `UBaseType_t`（无符号计数），用 `ux` 前缀。
 - 两者在 32 位平台上都是 `uint32_t`，但语义不同（时间 vs 个数），所以前缀不同。
+
+## 上下文切换（PendSV + SVC）
+
+> 切换任务 = 保存当前任务的 CPU 现场，再恢复另一个任务的现场。
+> 现场存在各任务的栈里；切换由 PendSV（最低优先级异常）完成。
+
+相关代码：[rtos/port/port.c](../rtos/port/port.c)
+
+### 为什么用 PendSV 而不是直接在 SysTick 里切？
+
+- SysTick 是普通外设中断，如果它打断了一个更高优先级的中断，直接切任务
+  会把"中断处理到一半"的任务切走，造成嵌套混乱。
+- PendSV 优先级设成最低（0xFF），所有中断都处理完才轮到它，此时切换最安全。
+
+### 一次切换发生了什么
+
+1. 硬件自动保存：进入异常时，CPU 自动把 R0-R3、R12、LR、PC、xPSR 压进
+   当前任务栈（PSP）。
+2. 软件保存：PendSV 里 `stmdb r0!, {r4-r11}` 再压入 R4-R11（AAPCS 规定
+   这些由被调用方保存，硬件不帮你压）。
+3. 选下一个任务：调用 `vTaskSwitchContext()`（按优先级 + 同优先级轮转）。
+4. 恢复：`ldmia r0!, {r4-r11}` 弹出新任务的 R4-R11，`msr psp, r0` 切换 PSP，
+   `bx r14` 用 EXC_RETURN 让硬件继续弹出剩下的寄存器。
+
+### 启动第一个任务为什么用 SVC
+
+第一次没有"上一个任务"可保存，只需要"恢复"。SVC 异常返回时把 EXC_RETURN
+从 `0xFFFFFFF9`（线程模式 + MSP）改成 `0xFFFFFFFD`（线程模式 + PSP），
+CPU 一返回就开始从任务栈恢复现场——任务跑起来了。
+
+### 栈帧布局（低地址在下）
+
+```
+[R4..R11][R0..R3][R12][LR][PC][xPSR]
+```
+
+- PC 填任务函数入口；xPSR 的 Thumb 位必须为 1（Cortex-M 只执行 Thumb 指令）。
+- LR 填 `prvTaskExitError`：任务函数万一 return，就停在那里。
+- R0 填任务参数。

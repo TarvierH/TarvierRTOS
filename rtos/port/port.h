@@ -1,7 +1,4 @@
-/* 移植层接口声明。具体实现放在 rtos/port 下：
- *  - Cortex-M3 版本（下一步）：用汇编/内联汇编构造真实栈帧
- *  - 宿主测试版本：在 PC 上用占位实现验证核心逻辑
- */
+/* 移植层接口：Cortex-M3 上下文切换（port.c 实现）。 */
 #ifndef PORT_H
 #define PORT_H
 
@@ -13,5 +10,15 @@
 uint32_t *pxPortInitialiseStack(uint32_t *pxTopOfStack,
                                 TaskFunction_t pxCode,
                                 void *pvParameters);
+
+/* 启动调度器：设置中断优先级并启动第一个任务（不会返回） */
+void xPortStartScheduler(void);
+
+/* 请求一次上下文切换：置位 PendSV（可在任务或中断里调用） */
+void taskYIELD(void);
+
+/* SysTick 钩子：bsp.c 以弱符号调用，port.c 用强符号覆盖，
+ * 在其中执行调度节拍处理。 */
+void rtos_systick_hook(void);
 
 #endif /* PORT_H */

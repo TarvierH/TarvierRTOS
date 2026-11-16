@@ -22,4 +22,8 @@ uint32_t bsp_get_tick(void);         /* milliseconds since boot          */
  * will hook in later. */
 void bsp_tick_isr(void);
 
+/* SysTick 钩子：bsp.c 提供弱符号空实现，RTOS（port.c）用强符号覆盖。
+ * 每个 1ms 节拍都会调用；调度器启动前为空操作。 */
+void rtos_systick_hook(void);
+
 #endif /* BSP_H */
