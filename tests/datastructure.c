@@ -94,13 +94,16 @@ int main()
     vPrintStudents(&student_list);
 
     printf("delete odd id\n");
-    for (ListItem_t *pxIt = student_list.xListEnd.pxNext; pxIt->xItemValue < UINT32_MAX; pxIt = pxIt->pxNext)
+    for (ListItem_t *pxIt = student_list.xListEnd.pxNext; pxIt->xItemValue < UINT32_MAX; )
     {
         student = (Student_t *)(pxIt->pvOwner);
+        ListItem_t *pxNext = pxIt->pxNext;   /* ① 先保存下一个，再 free */
         if ((student->xId) % 2 == 1)
         {
             vListDel(&student->xListItem);
+            free(student);
         }
+        pxIt = pxNext;                       /* ③ 用保存的指针继续 */
     }
     vPrintStudents(&student_list);
     return 0;

@@ -133,6 +133,85 @@ CPU 一返回就开始从任务栈恢复现场——任务跑起来了。
 
 ### 非侵入式（教科书）
 
+## 侵入式链表里 free 对象导致的 use-after-free
+
+### 问题
+
+遍历侵入式链表时，删除节点并 `free(owner)` 之后，循环的步进语句
+`pxIt = pxIt->pxNext` 读取了已释放的内存：
+
+```c
+for (ListItem_t *pxIt = list->xListEnd.pxNext;
+     pxIt->xItemValue < UINT32_MAX;
+     pxIt = pxIt->pxNext) {          // ← free 之后这里读 pxIt->pxNext
+    Student_t *student = (Student_t *)pxIt->pvOwner;
+    if (student->xId % 2 == 1) {
+        vListDel(&student->xListItem);
+        free(student);               // ← 释放了整个 student 块
+    }
+}
+```
+
+### 根本原因：节点和对象是同一块内存
+
+侵入式链表只有**一次分配**：
+
+```c
+student = malloc(sizeof(*student));          // 一块内存，同时装数据 + 节点
+vListAdd(&student->xListItem, &list);        // 链进去的是 student 内部的字段
+```
+
+所以 `pxIt = &student->xListItem` 指向 student 块**内部**；`free(student)`
+释放的是整块，包括 `pxNext` 字段所在的存储位置：
+
+```
+free() 释放的整块内存
+┌──────────────────────────────────────────────┐
+│ xId │ cName[100] │ xListItem                 │
+│     │            │  ├ pxPrevious              │
+│     │            │  ├ pxNext   ← 就在这里     │
+│     │            │  ├ pvOwner  (=块首地址)    │
+│     │            │  └ xItemValue              │
+└──────────────────────────────────────────────┘
+                      ↑
+              pxIt = &student->xListItem
+```
+
+释放后 `pxIt` 变成悬空指针，`pxIt->pxNext` 读的就是已释放内存。
+
+### 易混淆点：pvOwner 和释放没关系
+
+`pvOwner` 只是存在节点里的一个**指针值**（= 块首地址），它本身不参与释放。
+真正的问题不是"pvOwner 被释放了"，而是"**节点本身（pxNext/pxPrevious 等字段）
+就存放在被释放的 student 块里**"。方向和直觉相反：
+
+- 不是 `student` 是 `pxIt` 的字段；
+- 而是 `xListItem` 是 `student` 的字段，`pxIt` 指向 student 块内部。
+
+### 为什么"碰巧能跑"
+
+`free()` 只是把块归还给堆管理器并标记，**不会立刻清零或归还 OS**。旧字节还
+保留着原来的 `pxNext`/`pxPrevious` 值，所以循环暂时走通。一旦堆管理器复用
+这块内存（后续 `malloc`），`pxIt->pxNext` 就变成垃圾值，程序崩溃或行为错乱。
+
+### 正确写法：先保存 next 再删除
+
+```c
+for (ListItem_t *pxIt = list->xListEnd.pxNext;
+     pxIt->xItemValue < UINT32_MAX; ) {
+    Student_t *student = (Student_t *)pxIt->pvOwner;
+    ListItem_t *pxNext = pxIt->pxNext;   // ① 先记住下一个节点
+    if (student->xId % 2 == 1) {
+        vListDel(&student->xListItem);
+        free(student);                   // ② 安全释放当前
+    }
+    pxIt = pxNext;                       // ③ 用保存的指针继续
+}
+```
+
+若不想释放（演示程序退出时无所谓），只删节点不 `free` 也能避免 UB，因为
+`vListDel` 后节点的 next/prev 字段仍然有效。
+
 ```c
 typedef struct node {
     TCB_t       *data;    /* 指向数据 */
