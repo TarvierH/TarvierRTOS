@@ -100,7 +100,6 @@ int main()
         if ((student->xId) % 2 == 1)
         {
             vListDel(&student->xListItem);
-            free(student);
         }
     }
     vPrintStudents(&student_list);
