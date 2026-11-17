@@ -93,7 +93,45 @@ for (pxIterator = &pxList->xListEnd;
 > 切换任务 = 保存当前任务的 CPU 现场，再恢复另一个任务的现场。
 > 现场存在各任务的栈里；切换由 PendSV（最低优先级异常）完成。
 
-相关代码：[rtos/port/port.c](../rtos/port/port.c)
+相关代码：[rtos/port/port.c](../rtos/port/port.c)、
+[startup_stm32f103.s](../startup_stm32f103.s)（向量表第 14 项）
+
+### PendSV 是什么
+
+- 全称 **Pendable Service Call**，Cortex-M 内置的**异常 14**，专为 RTOS 设计。
+- "Pend" = 挂起：向它发起请求后**先排队**，等 CPU 忙完更高优先级的事才响应。
+- 它是所有任务切换的**统一入口**，由软件触发。
+
+| 异常 | 作用 |
+|------|------|
+| SysTick（15） | 系统节拍，1ms 时基 |
+| **PendSV（14）** | **执行上下文切换** |
+| SVC（11） | 启动第一个任务 |
+
+### 它怎么触发
+
+只需向 `SCB->ICSR` 的 PENDSVSET 位写 1，PendSV 就被挂起：
+
+```c
+void taskYIELD(void)
+{
+    SCB->ICSR = SCB_ICSR_PENDSVSET;   /* 写 1 → 挂起 PendSV */
+    __asm volatile ("dsb" ::: "memory");
+    __asm volatile ("isb" ::: "memory");
+}
+```
+
+### 完整流程：挂起 → 响应 → 切换
+
+```
+SysTick 到点 → rtos_systick_hook() → 需要切换？ → taskYIELD()（挂起 PendSV）
+    ↓
+CPU 忙不忙？
+├─ 不忙 → 立刻响应 PendSV
+└─ 忙（高优先级中断中）→ PendSV 排队，等所有中断处理完
+    ↓
+PendSV_Handler：保存当前任务 → vTaskSwitchContext() 选新任务 → 恢复新任务
+```
 
 ### 为什么用 PendSV 而不是直接在 SysTick 里切？
 
@@ -260,6 +298,109 @@ typedef struct tcb {
 要**同时**挂在"队列等待列表"和"延时列表"上，所以需要两个节点。哪个条件先满足，
 就把任务从两条链表都摘下来放回就绪。
 
+## `vTaskDelay` 与延时列表（里程碑 2）
+
+> 忙等 vs 阻塞：忙等是"任务还在就绪列表，只是空转"；`vTaskDelay` 是"把任务从
+> 就绪列表摘掉，真正阻塞，CPU 去跑别的任务"。这才是 RTOS 的意义。
+
+相关代码：[rtos/core/task.c](../rtos/core/task.c) 的
+`vTaskDelay()`、`xTaskIncrementTick()`，[app/main.c](../app/main.c)。
+
+### 核心思想：存"绝对唤醒时刻"，按值排序
+
+每个阻塞任务记录一个绝对时刻：
+
+```c
+TickType_t xTimeToWake = xTickCount + ulTicksToDelay;  /* 不是"还差多少"，而是"什么时候醒" */
+```
+
+延时列表按这个值**升序**插入（用 `vListInsert`），所以"最早醒的任务"永远在表头。
+每个 tick 只需检查表头是否到期即可，O(1)。
+
+```
+延时列表：[tick=1000] → [tick=1500] → [tick=2000] → 哨兵
+            ↑表头：最早要醒的
+```
+
+### vTaskDelay 的五个步骤（顺序不能乱）
+
+```c
+void vTaskDelay(uint32_t ulTicksToDelay)
+{
+    prvRemoveTaskFromReadyList(pxCurrentTCB);          /* ① 摘出就绪列表 */
+    pxCurrentTCB->eState = TASK_STATE_BLOCKED;         /* ② 改状态 */
+    TickType_t xTimeToWake = xTickCount + ulTicksToDelay;  /* ③ 算唤醒时刻 */
+    pxCurrentTCB->xStateListItem.xItemValue = xTimeToWake; /* ④ 先设排序值 */
+    vListInsert(&xDelayedTaskList, &pxCurrentTCB->xStateListItem); /* ④ 再排序插入 */
+    taskYIELD();                                       /* ⑤ 让出 CPU */
+}
+```
+
+- 用的是 **`xStateListItem`**：任务原来挂在就绪列表，现在"搬家"到延时列表，
+  同一个节点从一条链表换到另一条。
+- **必须先设 `xItemValue` 再 `vListInsert`**——它是按值排序插入的。
+
+### 唤醒逻辑：每个 tick 检查表头
+
+```c
+BaseType_t xTaskIncrementTick(void)
+{
+    xTickCount++;    /* ① 时间前进 */
+
+    while (xDelayedTaskList.uxNumberOfItems > 0u) {
+        ListItem_t *pxHead = xDelayedTaskList.xListEnd.pxNext;  /* 表头 = 最早醒 */
+        TCB_t *pxTask = (TCB_t *)pxHead->pvOwner;               /* 节点反查任务 */
+
+        if ((TickType_t)pxHead->xItemValue > xTickCount) {
+            break;    /* 表头都没到，后面的更晚，停止 */
+        }
+
+        uxListRemove(pxHead);                /* 摘出延时列表（吃节点） */
+        pxTask->eState = TASK_STATE_READY;
+        prvAddTaskToReadyList(pxTask);       /* 挂回就绪列表（吃任务） */
+
+        xSwitchRequired = pdTRUE;            /* 有任务被唤醒，要切换 */
+    }
+
+    /* 原有轮转判断保留 */
+    if (pxReadyTasksLists[pxCurrentTCB->uxPriority].uxNumberOfItems > 1u) {
+        xSwitchRequired = pdTRUE;
+    }
+    return xSwitchRequired;
+}
+```
+
+- 用 `while` 不用 `if`：同一时刻可能有多个任务同时到期。
+- 判断到期：`xItemValue <= xTickCount`（唤醒时刻已到或已过）。
+
+### 最容易犯的错：节点 vs 任务类型混用
+
+| API | 参数类型 | 传什么 |
+|-----|---------|--------|
+| `vListInsert` / `vListInsertEnd` / `uxListRemove` | `ListItem_t *` | **节点** |
+| `prvAddTaskToReadyList` / `prvRemoveTaskFromReadyList` | `TCB_t *` | **任务** |
+
+典型错误：`prvAddTaskToReadyList(pxHead)` —— 把节点当任务传。
+后果：函数内部读 `pxTCB->uxPriority` 时，实际读到的是 `ListItem_t` 的 `xItemValue`
+（唤醒时刻），导致按错误优先级索引就绪列表数组 → 越界 → 崩溃。
+
+正确关系：`pxHead == &pxTask->xStateListItem`，靠 `pxHead->pvOwner` 反查回任务。
+
+### 任务结构从"轮询"翻转为"干完就睡"
+
+```c
+/* 忙等（旧）：一直空转，到点才干活 */
+for (;;) {
+    if (现在 - 上次 >= 500) { 做事情; }
+}
+
+/* 阻塞（新）：干完活就睡，CPU 去跑别人 */
+for (;;) {
+    做事情;
+    vTaskDelay(500);
+}
+```
+
 ## 就绪位图 `uxReadyPriorityBitmap`
 
 - 32 位整数，bit i = 优先级 i 是否有就绪任务。
@@ -272,18 +413,128 @@ uint32_t uxTopPriority = 31u - (uint32_t)__builtin_clz(uxReadyPriorityBitmap);
 - 维护三处必须一致：初始化清零、加任务置位、该优先级链表空时清位。
 - 作用：避免从头扫描每个优先级的链表数组（O(N) → O(1)）。
 
+## `__builtin_clz`：O(1) 找最高置位
+
+> 核心公式：`最高置位下标 = 31 - __builtin_clz(x)`。
+> 就绪位图每位代表一个优先级，所以这个下标就是"最高就绪优先级"。
+
+相关代码：[rtos/core/task.c](../rtos/core/task.c) 的
+`pxGetHighestPriorityReadyTask()` 和 `vTaskSwitchContext()`。
+
+### 含义
+
+`__builtin_clz(x)` 是 GCC/Clang 内建函数，全称 **Count Leading Zeros**：
+从最高位（bit 31）起数 `x` 有多少个**连续的 0**。
+
+例（8 位示意）：
+
+```
+x = 0b00101000
+     ↑↑ 前导零共 2 个 → __builtin_clz(x) = 2
+```
+
+### 为什么 `31 - clz` = 最高置位下标
+
+设最高置位在 bit N，则它上面（bit 31 ~ bit N+1）全是 0，共 `31 - N` 个前导零：
+
+```
+bit31 ... bit(N+1)  bitN   bit(N-1) ... bit0
+  0  0  0  0  0      1       ?  ?  ?  ?
+  └── 前导零：31 - N 个 ──┘
+```
+
+所以 `N = 31 - __builtin_clz(x)`。
+
+例：`bitmap = 0x28 = 0b...00101000`（优先级 3 和 5 就绪），
+前导零 26 个 → `31 - 26 = 5`，最高就绪优先级是 5。✓
+
+### 为什么用它
+
+- 在 ARM Cortex-M 上编译成**一条 `CLZ` 指令**，单周期完成。
+- 对比手写循环 `for (i=31; i!=0; i--)` 是 O(N)，`CLZ` 是 O(1)。
+- 这是调度器"常数时间选最高优先级任务"的关键。
+
+### 注意事项
+
+- **`clz(0)` 是未定义行为**：调用前必须先判断非 0：
+
+```c
+if (uxReadyPriorityBitmap == 0u) {
+    return;  /* 没有就绪任务 */
+}
+```
+
+- 配套 `__builtin_ctz`（数尾部零，Count Trailing Zeros）、
+  `__builtin_popcount`（数 1 的个数）、`__builtin_ffs`（最低置位下标，从 1 起）。
+
 ## 任务栈初始化（`pxPortInitialiseStack`）
 
 作用：在任务栈里**伪造第一次运行的"假中断现场"**，调度器靠一次异常返回启动任务。
 
-```c
-puxStackBuffer + (ulStackSizeBytes / sizeof(uint32_t))  /* 数组末尾 = 栈顶（栈向下生长） */
+相关代码：[rtos/port/port.c](../rtos/port/port.c) 的 `pxPortInitialiseStack`。
+
+### 核心思想：借"异常返回"之力启动任务
+
+Cortex-M 从异常返回时，硬件会自动从栈上按 **低地址 → 高地址** 弹出寄存器：
+
+```
+R0, R1, R2, R3, R12, LR, PC, xPSR
 ```
 
-- 从栈顶往低地址铺：xPSR、PC（任务入口）、LR（prvTaskExitError）、R0（参数）。
+只要在栈上按这个顺序提前摆好值，再让 CPU 执行一次异常返回，它就会：
+- 把 PC 设成任务入口 → 开始执行任务代码；
+- 把 R0 设成参数 → 任务函数第一句就能拿到参数；
+- 把 xPSR 的 Thumb 位置 1 → 告诉 CPU 执行 Thumb 指令（Cortex-M 必须）。
+
+### 函数实现逐行拆解
+
+```c
+uint32_t *pxPortInitialiseStack(uint32_t *pxTopOfStack,   /* 栈顶（最高地址） */
+                                TaskFunction_t pxCode,
+                                void *pvParameters)
+{
+    *(--pxTopOfStack) = 0x01000000u;                 /* xPSR：Thumb 位(bit24) 必须为 1 */
+    *(--pxTopOfStack) = (uint32_t)pxCode;            /* PC：任务入口地址 */
+    *(--pxTopOfStack) = (uint32_t)prvTaskExitError;  /* LR：任务 return 后停住 */
+    pxTopOfStack -= 5;                               /* R12,R3,R2,R1 留空 */
+    *pxTopOfStack = (uint32_t)pvParameters;          /* R0：任务参数（已到位，不再 --） */
+    pxTopOfStack -= 8;                               /* R4..R11 留空（软件保存，硬件不弹） */
+    return pxTopOfStack;                             /* 新的栈顶 */
+}
+```
+
+### 栈帧布局（上 = 高地址，先压）
+
+```
+高地址（栈底方向）
+  xPSR         ← 0x01000000（Thumb 位=1）
+  PC           ← pxCode（任务入口）
+  LR           ← prvTaskExitError（任务返回后停住）
+  R12,R3,R2,R1 ← 空位
+  R0           ← pvParameters（参数）
+  R4..R11      ← 8 个空位
+低地址（栈顶，返回给 pxTopOfStack）
+```
+
+- 入参 `pxTopOfStack = 栈数组基址 + 栈大小`（数组末尾 = 最高地址），栈向下生长。
+- `--pxTopOfStack` 先减后写；第 5 步写 R0 时指针已到位，所以**不用再 `--`**。
+
+### 谁在消费这个栈帧
+
+[SVC_Handler](../rtos/port/port.c) / [PendSV_Handler](../rtos/port/port.c) 里：
+
+```asm
+ldr  r0, [r1]        ; r0 = pxTopOfStack（本函数的返回值）
+ldmia r0!, {r4-r11}  ; ① 软件先弹 R4-R11（对应最后留的 8 个空位）
+msr  psp, r0         ; PSP 指向剩余栈帧（R0 的位置）
+bx   r14             ; ② 异常返回 → 硬件弹 R0-R3,R12,LR,PC,xPSR
+```
+
+- 第 ① 步弹掉 8 个字后，PSP 正好指向 R0；
+- 第 ② 步硬件异常返回，按顺序弹出 R0(=参数)、R1-R3、R12、LR(=ExitError)、
+  PC(=任务入口)、xPSR(Thumb) → 任务带参数跑起来。
+
 - 返回值存进 `pxTCB->pxTopOfStack`，TCB 把它放第一个字段（汇编按偏移 0 读取）。
-- 启动时：`ldr r0,[r1]` 取栈顶 → `ldmia` 恢复 R4-R11 → `msr psp` → `bx r14`，
-  硬件继续弹出 R0-R3/R12/LR/PC/xPSR → 任务带参数跑起来。
 
 ## C 语言要点
 
@@ -324,3 +575,63 @@ typedef void (*TaskFunction_t)(void *);   /* 任务函数类型 */
 | 失败 | 返回 NULL | 可能栈溢出 | 链接期可发现 |
 
 RTOS 内核偏爱静态分配（`xTaskCreateStatic` 由调用者提供栈和 TCB），换来确定性、无运行时失败。
+
+### 内存映射寄存器（Memory-Mapped I/O）
+
+相关代码：[bsp/stm32f103.h](../bsp/stm32f103.h)
+
+```c
+#define SCB ((SCB_TypeDef *)0xE000ED00UL)
+```
+
+- 把固定地址 `0xE000ED00`（SCB 寄存器组起始地址）强转成结构体指针，
+  于是 `SCB->ICSR` 就是"访问该地址处的一个 32 位寄存器"。
+- 前提：Cortex-M 上**外设寄存器被映射到内存地址空间**，访问某地址 = 读写硬件寄存器。
+
+#### 结构体字段布局 = 寄存器排布
+
+```c
+typedef struct {
+    volatile uint32_t CPUID;   /* 偏移 0x00 */
+    volatile uint32_t ICSR;    /* 偏移 0x04 */
+    volatile uint32_t VTOR;    /* 偏移 0x08 */
+    ...
+    volatile uint32_t SHPR3;   /* 偏移 0x20 */
+} SCB_TypeDef;
+```
+
+编译器按字段顺序连续布局，所以：
+
+```
+SCB->ICSR  → 0xE000ED00 + 4  = 0xE000ED04
+SCB->VTOR  → 0xE000ED00 + 8  = 0xE000ED08
+SCB->SHPR3 → 0xE000ED00 + 32 = 0xE000ED20
+```
+
+与硬件手册寄存器地址一一对应。
+
+#### 为什么必须 `volatile`
+
+硬件会**自己改变寄存器值**（如 PendSV 挂起后硬件置位 ICSR）。`volatile` 告诉
+编译器"每次都要真实读写这个地址，不许缓存/优化掉"，否则会读到过期值或丢失写入。
+
+#### 与普通指针的区别
+
+| | 普通指针 | 寄存器宏（如 SCB） |
+|---|---------|-------------------|
+| 指向 | 软件分配的内存 | 硬件定死的固定地址 |
+| 地址 | 编译器/运行时决定 | 芯片手册规定 |
+| 语法 | `*p` / `p->x` | 完全相同 |
+
+#### CMSIS 的关系
+
+这段代码手动实现了 CMSIS 里的现成定义（注释 `intentionally avoids CMSIS`）。
+看懂"结构体 + 强制转换 + volatile"这套模式，就懂了 HAL/标准库寄存器访问的底层原理。
+
+#### 项目里的使用
+
+```c
+SCB->ICSR = SCB_ICSR_PENDSVSET;   /* 挂起 PendSV：往 0xE000ED04 写 bit28=1 */
+SCB->SHPR3 |= (...);              /* 设优先级：改 0xE000ED20 的某些位 */
+```
+

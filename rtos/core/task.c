@@ -13,6 +13,12 @@ static StackType_t xIdleTaskStack[configMINIMAL_STACK_SIZE]
     __attribute__((aligned(8)));
 static TCB_t xIdleTaskTCB;
 
+/* 延时列表：任务阻塞等待唤醒时挂这里，按唤醒 tick 升序排列 */
+List_t xDelayedTaskList;
+
+/* 系统节拍计数：从调度器启动起累计的 tick 数 */
+volatile TickType_t xTickCount;
+
 static void prvIdleTask(void *pvParameters)
 {
     (void)pvParameters;
@@ -32,6 +38,7 @@ void vTaskInitialiseCore(void)
     for (uint32_t i = 0; i < configMAX_PRIORITIES; i++) {
         vListInitialise(&pxReadyTasksLists[i]);
     }
+    vListInitialise(&xDelayedTaskList);
     uxReadyPriorityBitmap = 0u;
 }
 
@@ -149,6 +156,28 @@ BaseType_t xTaskIncrementTick(void)
 {
     BaseType_t xSwitchRequired = pdFALSE;
 
+    /* ① 时间前进 1 tick */
+    xTickCount++;
+
+    /* ② 循环唤醒所有到期任务 */
+    while (xDelayedTaskList.uxNumberOfItems > 0u) {
+        ListItem_t *pxHead = xDelayedTaskList.xListEnd.pxNext;  /* 表头：最早醒 */
+        TCB_t *pxTask = (TCB_t *)pxHead->pvOwner;
+
+        /* 还没到唤醒时刻 → 后面的更晚，停止 */
+        if ((TickType_t)pxHead->xItemValue > xTickCount) {
+            break;
+        }
+
+        /* 到期：摘出延时列表，挂回就绪列表 */
+        uxListRemove(pxHead);
+        pxTask->eState = TASK_STATE_READY;
+        prvAddTaskToReadyList(pxTask);
+
+        xSwitchRequired = pdTRUE;   /* 有任务被唤醒，需要切换 */
+    }
+
+    /* ③ 原有轮转判断保留 */
     if (pxReadyTasksLists[pxCurrentTCB->uxPriority].uxNumberOfItems > 1u) {
         xSwitchRequired = pdTRUE;
     }
@@ -173,4 +202,23 @@ void vTaskStartScheduler(void)
     xPortStartScheduler();
 
     for (;;) { } /* 不应到达 */
+}
+
+void vTaskDelay(uint32_t ulTicksToDelay)
+{
+    /* ① 把当前任务从就绪列表摘除 */
+    prvRemoveTaskFromReadyList(pxCurrentTCB);
+
+    /* ② 状态改为阻塞 */
+    pxCurrentTCB->eState = TASK_STATE_BLOCKED;
+
+    /* ③ 计算绝对唤醒时刻 */
+    TickType_t xTimeToWake = xTickCount + ulTicksToDelay;
+
+    /* ④ 设置排序值并插入延时列表 */
+    pxCurrentTCB->xStateListItem.xItemValue = xTimeToWake;
+    vListInsert(&xDelayedTaskList, &pxCurrentTCB->xStateListItem);
+
+    /* ⑤ 让出 CPU，触发 PendSV */
+    taskYIELD();
 }

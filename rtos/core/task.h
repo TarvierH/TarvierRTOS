@@ -60,6 +60,12 @@ extern volatile uint32_t xSchedulerRunning;
 /* 系统节拍处理：返回 pdTRUE 表示需要切换任务 */
 BaseType_t xTaskIncrementTick(void);
 
+/* 延时列表：任务阻塞等待唤醒时挂这里，按唤醒 tick 升序排列 */
+extern List_t xDelayedTaskList;
+
+/* 系统节拍计数：从调度器启动起累计的 tick 数 */
+extern volatile TickType_t xTickCount;
+
 /* 选出下一个要运行的任务（在 PendSV 里调用） */
 void vTaskSwitchContext(void);
 
@@ -87,5 +93,8 @@ TCB_t *pxGetHighestPriorityReadyTask(void);
 /* 内部接口：加入 / 移出就绪列表 */
 void prvAddTaskToReadyList(TCB_t *pxTCB);
 void prvRemoveTaskFromReadyList(TCB_t *pxTCB);
+
+/* 让当前任务阻塞 ulTicksToDelay 个节拍后自动恢复就绪 */
+void vTaskDelay(uint32_t ulTicksToDelay);
 
 #endif /* TASK_H */

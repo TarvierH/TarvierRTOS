@@ -1,0 +1,12 @@
+{
+    "C infinite loop for1": {
+        "prefix": "for1",
+        "body": [
+            "for (;;)",
+            "{",
+            "\t$0",
+            "}"
+        ],
+        "description": "for(;;) 死循环模板"
+    }
+}

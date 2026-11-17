@@ -85,3 +85,46 @@
 
 ### 疑问/待查
 - PendSV 为何要设成最低优先级、为什么要用 PSP 而非 MSP——精读汇编时一并解决。
+
+---
+
+## 2026-11-17 · FreeRTOS 内核学习第 3 天
+
+### 今日目标
+读完 list/task/port 三大件，完成里程碑 2：`vTaskDelay` + 延时列表 + 唤醒逻辑。
+
+### 完成的任务
+
+1. **汇编与底层机制**
+   - 什么是 PendSV：Cortex-M 异常 14，"Pend"=挂起，切换的统一入口；优先级最低保证切换发生在中断处理完后。
+   - 什么是 NVIC：中断调度中心（使能/优先级/挂起/嵌套向量跳转）；PendSV/SysTick/SVC 三个系统异常归 SCB 管，外设中断归 NVIC 管。
+   - `taskYIELD`：写 ICSR bit28 挂起 PendSV + dsb/isb 同步，只"申请"不"立即切"。
+   - `prvStartFirstTask` 汇编：movw/movt 拼地址 → 读 VTOR 取初始 MSP → cpsie 开中断 → svc 0 触发 SVC。
+   - 学了 11 条核心汇编指令（ldr/str/mov/msr/mrs/ldmia/stmdb/bx/cpsie/svc/dsb/isb），够读懂 port.c。
+
+2. **内存映射寄存器**
+   - `#define SCB ((SCB_TypeDef *)0xE000ED00UL)`：把固定地址强转结构体指针，`SCB->ICSR` 就是按名字访问硬件寄存器。
+   - 字段布局=寄存器排布、为什么必须 volatile、与 CMSIS 的关系。
+
+3. **实现里程碑 2（亲手写代码）**
+   - 加 `configTICK_RATE_HZ`、延时列表 `xDelayedTaskList`、tick 计数 `xTickCount`。
+   - `vTaskDelay`：摘就绪 → 阻塞 → 算绝对唤醒时刻 → 排序插入延时列表 → yield。
+   - `xTaskIncrementTick`：tick++ → 循环唤醒到期任务 → 保留轮转判断。
+   - main.c 任务从"忙等"改成"干完活就睡"。
+   - **编译通过：0 错误 0 警告**（firmware.elf 1916 text / 1764 bss）。
+
+4. **踩坑记录**
+   - `prvAddTaskToReadyList(pxHead)` 把节点当任务传 → 类型错位导致按错误优先级索引数组。
+   - 教训：链表 API 吃节点（ListItem_t*），任务 API 吃任务（TCB_t*）。
+
+### 关键收获
+- 延时列表存"绝对唤醒时刻"并升序排序，于是每个 tick 只需检查表头，O(1)。
+- 阻塞 = 任务从就绪列表"搬家"到延时列表，用同一个 `xStateListItem`。
+- RTOS 时间管理的本质：SysTick 驱动 tick，延时列表按唤醒时刻排队，到点搬回就绪。
+
+### 下一步
+- 上板验证（make flash）观察 LED/串口。
+- 可选：`vTaskDelayUntil`（精确周期）、`vTaskSuspend`/`vTaskResume`、或开始 IPC 信号量。
+
+### 疑问/待查
+- 暂无。

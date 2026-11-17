@@ -6,3 +6,6 @@ build/
 *.map
 .vscode/tasks.json
 tests/*.exe
+# 受版权保护的参考书，不要提交到仓库
+*权威指南*.pdf
+*z-library*.pdf

@@ -2,8 +2,7 @@
  *  - LED 任务：约每 500ms 翻转一次 LED
  *  - 打印任务：约每秒通过串口打印一个计数
  *
- * 两个任务目前都靠“忙等”节拍来定时；下一课会用 vTaskDelay 让任务
- * 真正阻塞（进延时列表），而不是空转。 */
+ */
 #include "bsp.h"
 #include "task.h"
 
@@ -17,35 +16,26 @@ static TCB_t xPrintTaskTCB;
 static void prvLedTask(void *pvParameters)
 {
     (void)pvParameters;
-    uint32_t ulLast = bsp_get_tick();
-
-    for (;;) {
-        uint32_t ulNow = bsp_get_tick();
-        if (ulNow - ulLast >= 500u) {
-            ulLast = ulNow;
-            bsp_led_toggle();
-        }
+    for (;;)
+    {
+        bsp_led_toggle(); /* 翻转 LED */
+        vTaskDelay(500);  /* 睡 500ms */
     }
 }
 
 static void prvPrintTask(void *pvParameters)
 {
     (void)pvParameters;
-    uint32_t ulLast = bsp_get_tick();
     uint32_t ulSeconds = 0u;
-
-    for (;;) {
-        uint32_t ulNow = bsp_get_tick();
-        if (ulNow - ulLast >= 1000u) {
-            ulLast = ulNow;
-            ulSeconds++;
-            bsp_print("task2 ");
-            bsp_print_dec((int32_t)ulSeconds);
-            bsp_print(" s\r\n");
-        }
+    for (;;)
+    {
+        ulSeconds++;
+        bsp_print("task2 ");
+        bsp_print_dec((int32_t)ulSeconds);
+        bsp_print(" s\r\n");
+        vTaskDelay(1000);
     }
 }
-
 int main(void)
 {
     bsp_init();
@@ -61,7 +51,9 @@ int main(void)
                             sizeof(xPrintTaskStack), NULL, 1u,
                             xPrintTaskStack, &xPrintTaskTCB);
 
-    vTaskStartScheduler();   /* 启动调度器，不会返回 */
+    vTaskStartScheduler(); /* 启动调度器，不会返回 */
 
-    for (;;) { }
+    for (;;)
+    {
+    }
 }

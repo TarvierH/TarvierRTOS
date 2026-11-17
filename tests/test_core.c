@@ -42,6 +42,12 @@ void xPortStartScheduler(void)
     /* 宿主测试不会真正启动调度器 */
 }
 
+/* ---- 宿主平台：上下文切换请求占位（真机版在 port.c 触发 PendSV） ---- */
+void taskYIELD(void)
+{
+    /* 宿主测试不会真正切换任务 */
+}
+
 /* ---- 测试任务函数（不会被真正调度，仅用作创建参数） ---- */
 static void TaskA(void *p) { (void)p; }
 static void TaskB(void *p) { (void)p; }
