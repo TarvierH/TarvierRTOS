@@ -126,3 +126,122 @@ CPU 一返回就开始从任务栈恢复现场——任务跑起来了。
 - PC 填任务函数入口；xPSR 的 Thumb 位必须为 1（Cortex-M 只执行 Thumb 指令）。
 - LR 填 `prvTaskExitError`：任务函数万一 return，就停在那里。
 - R0 填任务参数。
+
+## 侵入式链表 vs 非侵入式链表
+
+> 侵入式 = 链表节点**内嵌**在对象里；非侵入式 = 节点是独立结构，用指针**指向**数据。
+
+### 非侵入式（教科书）
+
+```c
+typedef struct node {
+    TCB_t       *data;    /* 指向数据 */
+    struct node *next;
+} Node_t;
+```
+
+- 每次插入要 `malloc` 一个 Node（可能失败、有碎片、耗时不确定）。
+- 从节点到数据要跳一次指针（`node->data`）。
+
+### 侵入式（FreeRTOS / Linux 内核）
+
+```c
+typedef struct list_item {
+    struct list_item *pxNext, *pxPrevious;
+    void *pvOwner;          /* 指回拥有者 TCB */
+    void *pvContainer;      /* 所属链表 */
+    uint32_t xItemValue;
+} ListItem_t;
+
+typedef struct tcb {
+    ListItem_t xStateListItem;   /* 节点长在 TCB 里 */
+    ListItem_t xEventListItem;
+    /* ... */
+} TCB_t;
+```
+
+- 插入直接链入内嵌节点，**零 malloc**。
+- 从节点回查对象：`pvOwner`（Linux 用 `container_of` 反推地址）。
+
+### 为什么选侵入式
+
+1. 零动态分配：节点随对象一起静态存在，无失败、无碎片、确定性好。
+2. 一个对象可内嵌多个节点 → **同时挂多条链表**。
+3. 删除 O(1)：节点地址已知（就在对象里），无需遍历。
+4. 缓存友好：节点和数据在同一块内存。
+
+## TCB 的两个链表节点
+
+| 字段 | 挂到哪些链表 | 回答的问题 |
+|------|-------------|-----------|
+| `xStateListItem` | 就绪列表 / 挂起列表 / 延时列表 | 运行状态是什么？ |
+| `xEventListItem` | 队列、信号量等事件等待列表 | 在等什么事件？ |
+
+一个节点只有一对 next/prev，不能同时待在两个链表里；但任务"带超时等队列"时
+要**同时**挂在"队列等待列表"和"延时列表"上，所以需要两个节点。哪个条件先满足，
+就把任务从两条链表都摘下来放回就绪。
+
+## 就绪位图 `uxReadyPriorityBitmap`
+
+- 32 位整数，bit i = 优先级 i 是否有就绪任务。
+- 配合 `__builtin_clz`（数前导零）在 O(1) 内找到最高就绪优先级：
+
+```c
+uint32_t uxTopPriority = 31u - (uint32_t)__builtin_clz(uxReadyPriorityBitmap);
+```
+
+- 维护三处必须一致：初始化清零、加任务置位、该优先级链表空时清位。
+- 作用：避免从头扫描每个优先级的链表数组（O(N) → O(1)）。
+
+## 任务栈初始化（`pxPortInitialiseStack`）
+
+作用：在任务栈里**伪造第一次运行的"假中断现场"**，调度器靠一次异常返回启动任务。
+
+```c
+puxStackBuffer + (ulStackSizeBytes / sizeof(uint32_t))  /* 数组末尾 = 栈顶（栈向下生长） */
+```
+
+- 从栈顶往低地址铺：xPSR、PC（任务入口）、LR（prvTaskExitError）、R0（参数）。
+- 返回值存进 `pxTCB->pxTopOfStack`，TCB 把它放第一个字段（汇编按偏移 0 读取）。
+- 启动时：`ldr r0,[r1]` 取栈顶 → `ldmia` 恢复 R4-R11 → `msr psp` → `bx r14`，
+  硬件继续弹出 R0-R3/R12/LR/PC/xPSR → 任务带参数跑起来。
+
+## C 语言要点
+
+### 函数指针 typedef
+
+```c
+typedef void (*TaskFunction_t)(void *);   /* 任务函数类型 */
+/* 不用 typedef 的等价写法：void (*pxTaskCode)(void *); */
+```
+
+- `(*name)` 的括号不能省：`void *f(void *)` 是"返回 void* 的函数"，不是函数指针。
+- typedef 把复杂度收起来，参数列表才清爽。
+
+### `(void)变量;`
+
+- 空操作，把参数"消费"一次，消除 `-Wunused-parameter`（`-Wextra` 开启）警告。
+- 函数签名必须带该参数（如 `TaskFunction_t` 要求 `void *`），但实现用不到时使用。
+
+### `__attribute__((aligned(8)))`
+
+- GCC 扩展，强制变量起始地址按 8 字节对齐。
+- 任务栈对齐是为了满足 Cortex-M AAPCS：栈指针在公开接口处必须 8 字节对齐。
+
+### `extern` 声明放 `.h` 的好处
+
+- 定义只在一处 `.c`（真正分配内存），声明放 `.h` 供所有文件 include。
+- 好处：单一权威来源，避免各文件手写 `extern` 造成类型漂移（链接器不检查类型）。
+- 注意：`extern uint32_t x = 0;` 带初始化是**定义**不是声明。
+
+### malloc 与定义变量的区别
+
+| 维度 | malloc（堆） | 局部变量（栈） | 全局/静态（静态区） |
+|------|-------------|---------------|--------------------|
+| 分配时机 | 运行时按需 | 进入函数自动 | 编译/链接时 |
+| 生命周期 | 到 free | 函数返回即失效 | 整个程序 |
+| 大小 | 运行时可变 | 编译期固定 | 编译期固定 |
+| 释放 | 手动 free | 自动 | 无需 |
+| 失败 | 返回 NULL | 可能栈溢出 | 链接期可发现 |
+
+RTOS 内核偏爱静态分配（`xTaskCreateStatic` 由调用者提供栈和 TCB），换来确定性、无运行时失败。

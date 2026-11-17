@@ -19,8 +19,8 @@ typedef struct list_item {
     uint32_t xItemValue;        /* 排序值（如延时列表里的唤醒 tick） */
     struct list_item *pxNext;
     struct list_item *pxPrevious;
-    void *pvOwner;              /* 拥有者，通常是任务控制块 TCB */
-    void *pvContainer;          /* 所属链表 List_t*；NULL = 不在任何链表中 */
+    void *pvOwner;              /* 拥有者，通常是任务控制块 TCB  利用pvOwner获取数据 一个结构体可以定义多个ListItem_t实现挂在多个链表上*/ 
+    void *pvContainer;          /* 所属链表 List_t*；NULL = 不在任何链表中 利用pvContainer获取所在的链表 */
 } ListItem_t;
 
 typedef struct list {
