@@ -28,10 +28,12 @@ void bsp_init(void)
     GPIOA->CRH &= ~(0xFu << 8);
     GPIOA->CRH |=  (0x4u << 8);    /* MODE=00, CNF=01 */
 
-    /* 8N1 @ 115200 with the fractional baud divider:
-     * divisor = 8e6 / 115200 = 69.44 -> mantissa 69, fraction 7 */
-    uint32_t div  = HSI_HZ / UART_BAUD;
-    uint32_t frac = (HSI_HZ % UART_BAUD) * 16u / UART_BAUD;
+    /* 8N1 @ 115200 with the fractional baud divider.
+     * STM32F1 波特率公式：USARTDIV = f_PCLK / (16 * 波特率)
+     * = 8e6 / (16*115200) = 4.34 -> 尾数 4，小数 0.34*16 ≈ 5 */
+    uint32_t div  = HSI_HZ / (UART_BAUD * 16u);
+    uint32_t frac = ((HSI_HZ % (UART_BAUD * 16u)) * 16u + (UART_BAUD * 8u))
+                    / (UART_BAUD * 16u);
     USART1->BRR = (div << 4) | frac;
     USART1->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE;
 

@@ -1,59 +1,54 @@
-/* 最小 RTOS 演示：两个同优先级任务在 1ms 时间片下轮转运行。
- *  - LED 任务：约每 500ms 翻转一次 LED
- *  - 打印任务：约每秒通过串口打印一个计数
- *
- */
 #include "bsp.h"
 #include "task.h"
+#include "semaphore.h"
 
 #define TASK_STACK_WORDS 128u
 
-static StackType_t xLedTaskStack[TASK_STACK_WORDS] __attribute__((aligned(8)));
-static TCB_t xLedTaskTCB;
-static StackType_t xPrintTaskStack[TASK_STACK_WORDS] __attribute__((aligned(8)));
-static TCB_t xPrintTaskTCB;
+static Queue_t xSemBuffer;   /* 二值信号量的队列结构体 */
 
-static void prvLedTask(void *pvParameters)
+static StackType_t xWaiterStack[TASK_STACK_WORDS] __attribute__((aligned(8)));
+static TCB_t       xWaiterTCB;
+static StackType_t xSignalerStack[TASK_STACK_WORDS] __attribute__((aligned(8)));
+static TCB_t       xSignalerTCB;
+
+/* 等待者：阻塞等信号 */
+static void prvWaiterTask(void *pvParameters)
 {
     (void)pvParameters;
-    for (;;)
-    {
-        bsp_led_toggle(); /* 翻转 LED */
-        vTaskDelay(500);  /* 睡 500ms */
+    for (;;) {
+        xSemaphoreTake(&xSemBuffer, portMAX_DELAY);  /* 计数 0 → 阻塞，直到有人 give */
+        bsp_print("signal received!\r\n");
     }
 }
 
-static void prvPrintTask(void *pvParameters)
+/* 发信号者：每 1s 给一次信号 */
+static void prvSignalerTask(void *pvParameters)
 {
     (void)pvParameters;
-    uint32_t ulSeconds = 0u;
-    for (;;)
-    {
-        ulSeconds++;
-        bsp_print("task2 ");
-        bsp_print_dec((int32_t)ulSeconds);
-        bsp_print(" s\r\n");
-        vTaskDelay(1000);
+    TickType_t xLast = xTaskGetTickCount();
+    for (;;) {
+        bsp_print("give signal\r\n");
+        xSemaphoreGive(&xSemBuffer);                 /* 计数 +1，唤醒等待者 */
+        vTaskDelayUntil(&xLast, 1000);
     }
 }
+
 int main(void)
 {
     bsp_init();
-
-    bsp_print("\r\n=== TarvierRTOS: two tasks round-robin ===\r\n");
+    bsp_print("\r\n=== Binary semaphore demo (M5) ===\r\n");
 
     vTaskInitialiseCore();
 
-    (void)xTaskCreateStatic(prvLedTask, "LED",
-                            sizeof(xLedTaskStack), NULL, 1u,
-                            xLedTaskStack, &xLedTaskTCB);
-    (void)xTaskCreateStatic(prvPrintTask, "PRINT",
-                            sizeof(xPrintTaskStack), NULL, 1u,
-                            xPrintTaskStack, &xPrintTaskTCB);
+    xSemaphoreCreateBinaryStatic(&xSemBuffer);
 
-    vTaskStartScheduler(); /* 启动调度器，不会返回 */
+    (void)xTaskCreateStatic(prvWaiterTask, "WAITER",
+                            sizeof(xWaiterStack), NULL, 1u,
+                            xWaiterStack, &xWaiterTCB);
+    (void)xTaskCreateStatic(prvSignalerTask, "SIGNAL",
+                            sizeof(xSignalerStack), NULL, 1u,
+                            xSignalerStack, &xSignalerTCB);
 
-    for (;;)
-    {
-    }
+    vTaskStartScheduler();
+    for (;;) { }
 }

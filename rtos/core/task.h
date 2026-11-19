@@ -96,5 +96,26 @@ void prvRemoveTaskFromReadyList(TCB_t *pxTCB);
 
 /* 让当前任务阻塞 ulTicksToDelay 个节拍后自动恢复就绪 */
 void vTaskDelay(uint32_t ulTicksToDelay);
+TickType_t xTaskGetTickCount(void);   /* 返回 xTickCount */
+void vTaskDelayUntil(TickType_t *pxPreviousWakeTime, uint32_t ulTimeIncrement);
+
+void vTaskSuspend(TaskHandle_t xTaskToSuspend);
+void vTaskResume(TaskHandle_t xTaskToResume);
+
+void vTaskPrioritySet(TaskHandle_t xTask, uint32_t uxNewPriority);
+
+void vTaskDelete(TaskHandle_t xTaskToDelete);
+
+#define portMAX_DELAY ((TickType_t)0xFFFFFFFFu)   /* 无限等待 */
+
+/* 超时状态：记录"进入等待"的时刻，用于计算剩余时间 */
+typedef struct {
+    TickType_t xTimeOnEntering;
+} TimeOut_t;
+
+void vTaskSetTimeOutState(TimeOut_t *pxTimeOut);
+BaseType_t xTaskCheckForTimeOut(TimeOut_t *pxTimeOut, TickType_t *pxTicksToWait);
+void vTaskPlaceOnEventList(List_t *pxEventList, TickType_t xTicksToWait);
+BaseType_t xTaskRemoveFromEventList(List_t *pxEventList);
 
 #endif /* TASK_H */

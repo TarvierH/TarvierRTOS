@@ -6,4 +6,5 @@
 #define configMINIMAL_STACK_SIZE  64  /* 最小任务栈，单位：字（4 字节） */
 #define configTICK_RATE_HZ   1000   /* 每秒节拍数：1ms 一个 tick */
 
+
 #endif /* RTOS_CONFIG_H */

@@ -18,7 +18,9 @@ SRCS := app/main.c \
         bsp/syscalls.c \
         rtos/core/task.c \
         rtos/core/list.c \
-        rtos/port/port.c
+        rtos/port/port.c \
+        rtos/ipc/queue.c\
+		rtos/ipc/semaphore.c
 ASMS := startup_stm32f103.s
 
 OBJS := $(addprefix $(BUILD)/, $(SRCS:.c=.o)) \
@@ -26,7 +28,7 @@ OBJS := $(addprefix $(BUILD)/, $(SRCS:.c=.o)) \
 
 CFLAGS  := -mcpu=cortex-m3 -mthumb -O2 -g3 -std=c11 \
            -Wall -Wextra -ffunction-sections -fdata-sections \
-           -Ibsp -Iapp -Irtos -Irtos/core -Irtos/port
+           -Ibsp -Iapp -Irtos -Irtos/core -Irtos/port -Irtos/ipc
 LDFLAGS := -mcpu=cortex-m3 -mthumb -nostartfiles -T linker.ld \
            -Wl,--gc-sections -Wl,-Map=$(BUILD)/$(TARGET).map \
            --specs=nano.specs
